@@ -21,24 +21,24 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-cbuffer cbuff : register(b4)
+cbuffer clearColourBuffer : register(b4)
 {
-    float4 clear_colour;
+    float4 clearColour;
 };
 
-SamplerState screen_sampler_s : register(s0);
-Texture2D<float4> screen_texture : register(t0);
+SamplerState sourceSampler : register(s0);
+Texture2D<float4> sourceTexture : register(t0);
 
-float4 PS_ScreenSpace(float4 v0 : SV_POSITION, float2 v1 : TEXCOORD0) : SV_TARGET
+float4 PS_ScreenSpace(float4 position : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_TARGET
 {
-    float4 o0;
-    o0.xyzw = screen_texture.Sample(screen_sampler_s, v1.xy).xyzw;
-    return o0;
+    float4 outputColour;
+    outputColour.xyzw = sourceTexture.Sample(sourceSampler, texCoord.xy).xyzw;
+    return outputColour;
 }
 
-float4 PS_ScreenClear(float4 v0 : SV_POSITION) : SV_TARGET
+float4 PS_ScreenClear(float4 position : SV_POSITION) : SV_TARGET
 {
-    float4 o0;
-    o0.xyzw = clear_colour.xyzw;
-    return o0;
+    float4 outputColour;
+    outputColour.xyzw = clearColour.xyzw;
+    return outputColour;
 }

@@ -350,7 +350,7 @@ public:
 
         ID3D11DeviceContext *m_pDeviceContext;
         ID3DUserDefinedAnnotation *userAnnotation;
-        DWORD annotateDepth;
+        int annotateDepth;
         DirectX::XMMATRIX matrixStacks[MATRIX_MODE_MODELVIEW_MAX][STACK_SIZE];
         bool matrixDirty[MATRIX_MODE_MODELVIEW_MAX];
         DWORD stackPos[MATRIX_MODE_MODELVIEW_MAX];
@@ -457,9 +457,9 @@ public:
     DWORD reservedRendererDword1;
     int16_t *m_commandHandleToIndex;
     CommandBuffer **m_commandBuffers;
-    uint8_t *m_commandPrimitiveTypes;
     DirectX::XMMATRIX *m_commandMatrices;
     int *m_commandIndexToHandle;
+    uint8_t *m_commandPrimitiveTypes;
     uint8_t *m_commandVertexTypes;
     DWORD reservedRendererDword2;
     DWORD reservedRendererDword3;

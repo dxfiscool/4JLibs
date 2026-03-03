@@ -21,79 +21,73 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-cbuffer diffuse : register(b0)
+cbuffer tint : register(b0)
 {
-    float4 diffuse_colour;
+    float4 tintColour;
 };
 cbuffer fog : register(b1)
 {
-    float4 fog_colour;
+    float4 fogColour;
 };
 cbuffer alphaTest : register(b3)
 {
-    float4 alphaTestRef;
+    float4 alphaTestReference;
 };
 
 #ifdef FORCE_LOD
 cbuffer forcedLOD : register(b5)
 {
-    float4 forcedLod;
+    float4 forcedLodLevel;
 };
 #endif
 
-SamplerState diffuse_sampler_s : register(s0);
-Texture2D<float4> diffuse_texture : register(t0);
+SamplerState diffuseSampler : register(s0);
+Texture2D<float4> diffuseTexture : register(t0);
 
 struct PS_INPUT
 {
-    float4 v0 : SV_POSITION;
-    float4 v1 : COLOR0;
-    linear centroid float4 v2 : TEXCOORD0;
+    float4 position : SV_POSITION;
+    float4 vertexColour : COLOR0;
+    linear centroid float4 texCoordFogFactorProjection : TEXCOORD0;
 };
 
 float4 main(PS_INPUT input) : SV_TARGET
 {
-    float4 r0, r1;
+    float4 sampledColour;
+    float4 outputColour;
 
 #ifdef TEXTURE_PROJECTION
-    r0.xy = input.v2.xy / input.v2.ww;
-    r0.xyzw = diffuse_texture.Sample(diffuse_sampler_s, r0.xy).xyzw;
-    r0.xyzw = diffuse_colour.xyzw * r0.xyzw;
-    r0.w = input.v1.w * r0.w;
-    r1.x = (r0.w < alphaTestRef.w) ? 1 : 0;
-    if (r1.x != 0) discard;
-    r0.xyz = r0.xyz * input.v1.xyz + -fog_colour.xyz;
-    float4 o0;
-    o0.xyz = input.v2.zzz * r0.xyz + fog_colour.xyz;
-    o0.w = r0.w;
-    return o0;
+    float2 projectedTextureUV = input.texCoordFogFactorProjection.xy / input.texCoordFogFactorProjection.ww;
+    sampledColour.xyzw = diffuseTexture.Sample(diffuseSampler, projectedTextureUV).xyzw;
+    sampledColour.xyzw = tintColour.xyzw * sampledColour.xyzw;
+    sampledColour.w = input.vertexColour.w * sampledColour.w;
+    if (sampledColour.w < alphaTestReference.w) discard;
+    sampledColour.xyz = sampledColour.xyz * input.vertexColour.xyz + -fogColour.xyz;
+    outputColour.xyz = input.texCoordFogFactorProjection.zzz * sampledColour.xyz + fogColour.xyz;
+    outputColour.w = sampledColour.w;
+    return outputColour;
 
 #elif defined(FORCE_LOD)
-    r0.xyzw = diffuse_texture.SampleLevel(diffuse_sampler_s, input.v2.xy, forcedLod.x).xyzw;
-    r0.xyzw = diffuse_colour.xyzw * r0.xyzw;
-    r0.w = input.v1.w * r0.w;
-    r1.x = (r0.w < alphaTestRef.w) ? 1 : 0;
-    if (r1.x != 0) discard;
-    r0.xyz = r0.xyz * input.v1.xyz + -fog_colour.xyz;
-    float4 o0;
-    o0.xyz = input.v2.zzz * r0.xyz + fog_colour.xyz;
-    o0.w = r0.w;
-    return o0;
+    sampledColour.xyzw = diffuseTexture.SampleLevel(diffuseSampler, input.texCoordFogFactorProjection.xy, forcedLodLevel.x).xyzw;
+    sampledColour.xyzw = tintColour.xyzw * sampledColour.xyzw;
+    sampledColour.w = input.vertexColour.w * sampledColour.w;
+    if (sampledColour.w < alphaTestReference.w) discard;
+    sampledColour.xyz = sampledColour.xyz * input.vertexColour.xyz + -fogColour.xyz;
+    outputColour.xyz = input.texCoordFogFactorProjection.zzz * sampledColour.xyz + fogColour.xyz;
+    outputColour.w = sampledColour.w;
+    return outputColour;
 
 #else
-    r0.x = (1 < input.v2.x) ? 1 : 0;
-    if (r0.x != 0)
-        r0.xyzw = diffuse_texture.SampleLevel(diffuse_sampler_s, input.v2.xy, 0).xyzw;
+    if (1 < input.texCoordFogFactorProjection.x)
+        sampledColour.xyzw = diffuseTexture.SampleLevel(diffuseSampler, input.texCoordFogFactorProjection.xy, 0).xyzw;
     else
-        r0.xyzw = diffuse_texture.Sample(diffuse_sampler_s, input.v2.xy).xyzw;
-    r0.xyzw = diffuse_colour.xyzw * r0.xyzw;
-    r0.w = input.v1.w * r0.w;
-    r1.x = (r0.w < alphaTestRef.w) ? 1 : 0;
-    if (r1.x != 0) discard;
-    r0.xyz = r0.xyz * input.v1.xyz + -fog_colour.xyz;
-    float4 o0;
-    o0.xyz = input.v2.zzz * r0.xyz + fog_colour.xyz;
-    o0.w = r0.w;
-    return o0;
+        sampledColour.xyzw = diffuseTexture.Sample(diffuseSampler, input.texCoordFogFactorProjection.xy).xyzw;
+    sampledColour.xyzw = tintColour.xyzw * sampledColour.xyzw;
+    sampledColour.w = input.vertexColour.w * sampledColour.w;
+    if (sampledColour.w < alphaTestReference.w) discard;
+    sampledColour.xyz = sampledColour.xyz * input.vertexColour.xyz + -fogColour.xyz;
+    outputColour.xyz = input.texCoordFogFactorProjection.zzz * sampledColour.xyz + fogColour.xyz;
+    outputColour.w = sampledColour.w;
+    return outputColour;
 #endif
 }

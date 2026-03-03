@@ -21,37 +21,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-cbuffer screenspace_constants : register(b9)
+cbuffer thumbnailCropBounds : register(b9)
 {
-    float4 v_scaleoffset;
+    float4 uvScaleOffset;
 };
 
-void VS_ScreenSpace(uint v0 : SV_VertexID, out float4 o0 : SV_POSITION, out float2 o1 : TEXCOORD0)
+void VS_ScreenSpace(uint vertexId : SV_VertexID, out float4 position : SV_POSITION, out float2 texCoord : TEXCOORD0)
 {
-    float4 r0, r1;
+    float2 baseUV;
 
-    o0.zw = float2(1, 1);
-    r0.xy = (int2)v0.xx & int2(1, -2);
-    r0.z = (uint)r0.x << 1;
-    r0.yz = (int2)r0.yz + int2(-1, -1);
-    r1.x = (int)r0.x;
-    o0.xy = (int2)r0.zy;
-    r0.x = (uint)v0.x >> 1;
-    r0.x = (int)-r0.x + 1;
-    r1.y = (int)r0.x;
-    o1.xy = r1.xy * v_scaleoffset.zw + v_scaleoffset.xy;
+    baseUV.x = (float)(vertexId & 1u);
+    baseUV.y = (float)(1u - (vertexId >> 1u));
+
+    position.xy = float2(baseUV.x * 2.0f - 1.0f, 1.0f - baseUV.y * 2.0f);
+    position.zw = float2(1.0f, 1.0f);
+    texCoord.xy = baseUV.xy * uvScaleOffset.zw + uvScaleOffset.xy;
 }
 
-void VS_ScreenClear(uint v0 : SV_VertexID, out float4 o0 : SV_POSITION)
+void VS_ScreenClear(uint vertexId : SV_VertexID, out float4 position : SV_POSITION)
 {
-    float4 r0;
+    float2 basePosition;
 
-    r0.x = (uint)v0.x << 1;
-    r0.x = (int)r0.x & 2;
-    r0.x = (int)r0.x + -1;
-    o0.x = (int)r0.x;
-    r0.x = (int)v0.x & -2;
-    r0.x = (int)r0.x + -1;
-    o0.y = (int)r0.x;
-    o0.zw = float2(1, 1);
+    basePosition.x = (float)((vertexId & 1u) * 2u) - 1.0f;
+    basePosition.y = (float)(vertexId >> 1u) * 2.0f - 1.0f;
+
+    position.xy = basePosition;
+    position.zw = float2(1.0f, 1.0f);
 }

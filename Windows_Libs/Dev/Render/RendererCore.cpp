@@ -246,13 +246,295 @@ void Renderer::BeginConditionalRendering(int) {}
 
 void Renderer::BeginConditionalSurvey(int) {}
 
+void Renderer::BeginEvent(LPCWSTR eventName)
+{
+    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    if (c && c->m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
+    {
+        c->userAnnotation->BeginEvent(eventName);
+        ++c->annotateDepth;
+    }
+}
+
+
 void Renderer::CaptureScreen(ImageFileBuffer *, XSOCIAL_PREVIEWIMAGE *) {}
+
+
+void Renderer::CaptureThumbnail(ImageFileBuffer *pngOut)
+{
+    Renderer::Context &c = getContext();
+
+    float left;
+    float bottom;
+    float right;
+    float top;
+
+    switch (m_ViewportType)
+    {
+    case C4JRender::VIEWPORT_TYPE_FULLSCREEN:
+        left = 0.0f;
+        bottom = 0.0f;
+        right = 1.0f;
+        top = 1.0f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_SPLIT_TOP:
+        left = 0.0f;
+        bottom = 0.0f;
+        right = 1.0f;
+        top = 0.5f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_SPLIT_BOTTOM:
+        left = 0.0f;
+        bottom = 0.5f;
+        right = 1.0f;
+        top = 1.0f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_SPLIT_LEFT:
+        left = 0.0f;
+        bottom = 0.0f;
+        right = 0.5f;
+        top = 1.0f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_SPLIT_RIGHT:
+        left = 0.0f;
+        bottom = 0.0f;
+        right = 0.5f;
+        top = 1.0f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_QUADRANT_TOP_LEFT:
+        left = 0.0f;
+        bottom = 0.0f;
+        right = 0.5f;
+        top = 0.5f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_QUADRANT_TOP_RIGHT:
+        left = 0.5f;
+        bottom = 0.0f;
+        right = 1.0f;
+        top = 0.5f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_QUADRANT_BOTTOM_LEFT:
+        left = 0.0f;
+        right = 0.5f;
+        bottom = 0.5f;
+        top = 1.0f;
+        break;
+    case C4JRender::VIEWPORT_TYPE_QUADRANT_BOTTOM_RIGHT:
+        left = 0.5f;
+        right = 1.0f;
+        bottom = 0.5f;
+        top = 1.0f;
+        break;
+    default:
+        break;
+    }
+
+    float aspectRatio = IsWidescreen() ? (16.0f / 9.0f) : (4.0f / 3.0f);
+
+    right *= aspectRatio;
+    left  *= aspectRatio;
+
+    float width  = right - left;
+    float height = top - bottom;
+
+    if (height > width)
+    {
+        float diff = (height - width) * 0.5f;
+        bottom += diff;
+        top    -= diff;
+    }
+    else
+    {
+        float diff = (width - height) * 0.5f;
+        left  += diff;
+        right -= diff;
+    }
+
+    left  /= aspectRatio;
+    right /= aspectRatio;
+
+    ID3D11BlendState *blendState = NULL;
+    ID3D11DepthStencilState *depthState = NULL;
+    ID3D11RasterizerState *rasterizerState = NULL;
+    ID3D11SamplerState *samplerState = NULL;
+    ID3D11Texture2D *stagingTexture = NULL;
+
+    D3D11_BLEND_DESC blendDesc = {};
+    blendDesc.RenderTarget[0].BlendEnable = false;
+    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    m_pDevice->CreateBlendState(&blendDesc, &blendState);
+
+    D3D11_DEPTH_STENCIL_DESC depthDesc = {};
+    depthDesc.DepthEnable = false;
+    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    depthDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    depthDesc.StencilEnable = false;
+    depthDesc.StencilReadMask = 0xFF;
+    depthDesc.StencilWriteMask = 0xFF;
+    depthDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    depthDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+    depthDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    depthDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+    depthDesc.BackFace = depthDesc.FrontFace;
+    m_pDevice->CreateDepthStencilState(&depthDesc, &depthState);
+
+    D3D11_RASTERIZER_DESC rasterDesc = {};
+    rasterDesc.FillMode = D3D11_FILL_SOLID;
+    rasterDesc.CullMode = D3D11_CULL_NONE;
+    rasterDesc.DepthClipEnable = true;
+    rasterDesc.MultisampleEnable = true;
+    m_pDevice->CreateRasterizerState(&rasterDesc, &rasterizerState);
+
+    D3D11_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.MaxAnisotropy = 16;
+    samplerDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
+    samplerDesc.MinLOD = -(std::numeric_limits<float>::max)();
+    samplerDesc.MaxLOD = (std::numeric_limits<float>::max)();
+    m_pDevice->CreateSamplerState(&samplerDesc, &samplerState);
+
+    c.m_pDeviceContext->VSSetShader(screenSpaceVertexShader, NULL, 0);
+    c.m_pDeviceContext->IASetInputLayout(NULL);
+    c.m_pDeviceContext->PSSetShader(screenSpacePixelShader, NULL, 0);
+    c.m_pDeviceContext->OMSetBlendState(blendState, NULL, -1);
+    c.m_pDeviceContext->OMSetDepthStencilState(depthState, 0);
+    c.m_pDeviceContext->RSSetState(rasterizerState);
+    blendState->Release();
+    depthState->Release();
+    rasterizerState->Release();
+    c.m_pDeviceContext->PSSetShaderResources(0, 0, NULL);
+
+    for (UINT i = 0; i < MAX_MIP_LEVELS - 1; ++i)
+    {
+        D3D11_VIEWPORT viewport = {};
+        viewport.TopLeftX = 0.0f;
+        viewport.TopLeftY = 0.0f;
+        viewport.Width = (float)s_auiWidths[i + 1];
+        viewport.Height = (float)s_auiHeights[i + 1];
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+
+        c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetViews[i], NULL);
+        c.m_pDeviceContext->RSSetViewports(1, &viewport);
+
+        ID3D11ShaderResourceView *inputTexture = (i == 0) ? renderTargetShaderResourceView : renderTargetShaderResourceViews[i - 1];
+        c.m_pDeviceContext->PSSetShaderResources(0, 1, &inputTexture);
+        c.m_pDeviceContext->PSSetSamplers(0, 1, &samplerState);
+        c.m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        c.m_pDeviceContext->Map(c.m_thumbnailBoundsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+
+        float *constants = (float *)mapped.pData;
+        if (i == 0)
+        {
+            constants[0] = left;
+            constants[1] = bottom;
+            constants[2] = right - left;
+            constants[3] = top - bottom;
+        }
+        else
+        {
+            constants[0] = 0.0f;
+            constants[1] = 0.0f;
+            constants[2] = 1.0f;
+            constants[3] = 1.0f;
+        }
+
+        c.m_pDeviceContext->Unmap(c.m_thumbnailBoundsBuffer, 0);
+        c.m_pDeviceContext->Draw(4, 0);
+    }
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    renderTargetTextures[MAX_MIP_LEVELS - 2]->GetDesc(&texDesc);
+    texDesc.Usage = D3D11_USAGE_STAGING;
+    texDesc.BindFlags = 0;
+    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    texDesc.MiscFlags = 0;
+    m_pDevice->CreateTexture2D(&texDesc, NULL, &stagingTexture);
+
+    const unsigned int stride = kThumbnailSize * 4;
+    unsigned char *linearData = new unsigned char[kThumbnailSize * stride];
+
+    if (stagingTexture)
+    {
+        c.m_pDeviceContext->CopyResource(stagingTexture, renderTargetTextures[MAX_MIP_LEVELS - 2]);
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        c.m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ_WRITE, 0, &mapped);
+        const unsigned char *src = static_cast<const unsigned char *>(mapped.pData);
+        unsigned char *dst = linearData;
+
+        for (UINT y = 0; y < kThumbnailSize; ++y)
+        {
+            memcpy(dst, src, stride);
+
+            unsigned char *alpha = dst + 3;
+            for (UINT x = 0; x < kThumbnailSize; ++x)
+            {
+                *alpha = 0xFF;
+                alpha += 4;
+            }
+
+            src += mapped.RowPitch;
+            dst += stride;
+        }
+
+        c.m_pDeviceContext->Unmap(stagingTexture, 0);
+    }
+
+    ConvertLinearToPng(pngOut, linearData, kThumbnailSize, kThumbnailSize);
+    delete[] linearData;
+
+    stagingTexture->Release();
+    samplerState->Release();
+
+    ID3D11BlendState *restoredBlendState = NULL;
+    ID3D11DepthStencilState *restoredDepthState = NULL;
+    ID3D11RasterizerState *restoredRasterizerState = NULL;
+
+    m_pDevice->CreateBlendState(&c.blendDesc, &restoredBlendState);
+    c.m_pDeviceContext->OMSetBlendState(restoredBlendState, c.blendFactor, 0xFFFFFFFF);
+    restoredBlendState->Release();
+
+    m_pDevice->CreateDepthStencilState(&c.depthStencilDesc, &restoredDepthState);
+    c.m_pDeviceContext->OMSetDepthStencilState(restoredDepthState, 0);
+    restoredDepthState->Release();
+
+    m_pDevice->CreateRasterizerState(&c.rasterizerDesc, &restoredRasterizerState);
+    c.m_pDeviceContext->RSSetState(restoredRasterizerState);
+    restoredRasterizerState->Release();
+
+    D3D11_VIEWPORT viewport = {};
+    viewport.TopLeftX = 0.0f;
+    viewport.TopLeftY = 0.0f;
+    viewport.Width = (float)backBufferWidth;
+    viewport.Height = (float)backBufferHeight;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+
+    c.m_pDeviceContext->RSSetViewports(1, &viewport);
+    c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
+
+    activeVertexType = -1;
+    activePixelType = -1;
+}
 
 void Renderer::Clear(int flags, D3D11_RECT *)
 {
     PROFILER_SCOPE("Renderer::Clear", "Clear", MP_MAGENTA)
 
-    Renderer::Context &c = getContext();
+    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    unsigned char clearFlags = static_cast<unsigned char>(flags);
 
     ID3D11BlendState *blendState = NULL;
     ID3D11DepthStencilState *depthState = NULL;
@@ -269,12 +551,12 @@ void Renderer::Clear(int flags, D3D11_RECT *)
     blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
     blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = (flags & CLEAR_COLOUR_FLAG) ? D3D11_COLOR_WRITE_ENABLE_ALL : 0;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = (clearFlags & CLEAR_COLOUR_FLAG) ? D3D11_COLOR_WRITE_ENABLE_ALL : 0;
     m_pDevice->CreateBlendState(&blendDesc, &blendState);
 
     PROFILER_SCOPE("Renderer::Clear", "Depth", MP_MAGENTA)
     D3D11_DEPTH_STENCIL_DESC depthDesc = {};
-    depthDesc.DepthEnable = (flags & CLEAR_DEPTH_FLAG) ? true : false;
+    depthDesc.DepthEnable = (clearFlags & CLEAR_DEPTH_FLAG) ? true : false;
     depthDesc.DepthWriteMask = depthDesc.DepthEnable ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     depthDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
     depthDesc.StencilEnable = false;
@@ -299,37 +581,36 @@ void Renderer::Clear(int flags, D3D11_RECT *)
     m_pDevice->CreateRasterizerState(&rasterDesc, &rasterizerState);
 
     PROFILER_SCOPE("Renderer::Clear", "DrawClearQuad", MP_MAGENTA)
-    c.m_pDeviceContext->VSSetShader(screenClearVertexShader, NULL, 0);
-    c.m_pDeviceContext->IASetInputLayout(NULL);
-    c.m_pDeviceContext->PSSetShader(screenClearPixelShader, NULL, 0);
-    c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
-    c.m_pDeviceContext->OMSetBlendState(blendState, NULL, 0xFFFFFFFF);
-    c.m_pDeviceContext->OMSetDepthStencilState(depthState, 0);
-    c.m_pDeviceContext->RSSetState(rasterizerState);
-    c.m_pDeviceContext->PSSetShaderResources(0, 0, NULL);
-    c.m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    c.m_pDeviceContext->Draw(4, 0);
+    m_pDeviceContext->VSSetShader(screenClearVertexShader, NULL, 0);
+    m_pDeviceContext->IASetInputLayout(NULL);
+    m_pDeviceContext->PSSetShader(screenClearPixelShader, NULL, 0);
+    m_pDeviceContext->OMSetBlendState(blendState, NULL, 0xFFFFFFFF);
+    m_pDeviceContext->OMSetDepthStencilState(depthState, 0);
+    m_pDeviceContext->RSSetState(rasterizerState);
+    c->m_pDeviceContext->PSSetShaderResources(0, 0, NULL);
+    c->m_pDeviceContext->IASetVertexBuffers(0, 0, NULL, NULL, NULL);
+    m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    m_pDeviceContext->Draw(4, 0);
 
-    if (blendState)
-    {
-        blendState->Release();
-        blendState = NULL;
-    }
-    if (depthState)
-    {
-        depthState->Release();
-        depthState = NULL;
-    }
-    if (rasterizerState)
-    {
-        rasterizerState->Release();
-        rasterizerState = NULL;
-    }
+    blendState->Release();
+    depthState->Release();
+    rasterizerState->Release();
 
-    c.m_pDeviceContext->OMSetBlendState(GetManagedBlendState(), c.blendFactor, 0xFFFFFFFF);
-    c.m_pDeviceContext->OMSetDepthStencilState(GetManagedDepthStencilState(), 0);
-    c.m_pDeviceContext->RSSetState(GetManagedRasterizerState());
-    c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
+    ID3D11BlendState *restoredBlendState = NULL;
+    ID3D11DepthStencilState *restoredDepthState = NULL;
+    ID3D11RasterizerState *restoredRasterizerState = NULL;
+
+    m_pDevice->CreateBlendState(&c->blendDesc, &restoredBlendState);
+    m_pDeviceContext->OMSetBlendState(restoredBlendState, c->blendFactor, 0xFFFFFFFF);
+    restoredBlendState->Release();
+
+    m_pDevice->CreateDepthStencilState(&c->depthStencilDesc, &restoredDepthState);
+    m_pDeviceContext->OMSetDepthStencilState(restoredDepthState, 0);
+    restoredDepthState->Release();
+
+    m_pDevice->CreateRasterizerState(&c->rasterizerDesc, &restoredRasterizerState);
+    m_pDeviceContext->RSSetState(restoredRasterizerState);
+    restoredRasterizerState->Release();
    
     activeVertexType = -1;
     activePixelType = -1;
@@ -365,26 +646,18 @@ void Renderer::DoScreenGrabOnNextPresent()
 void Renderer::EndConditionalRendering() {}
 void Renderer::EndConditionalSurvey() {}
 
-void Renderer::BeginEvent(LPCWSTR eventName)
-{
-    Renderer::Context &c = Renderer::getContext();
-    if (c.m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED && c.userAnnotation)
-    {
-        c.userAnnotation->BeginEvent(eventName);
-        ++c.annotateDepth;
-    }
-}
 
 void Renderer::EndEvent()
 {
-    Renderer::Context &c = Renderer::getContext();
-    if (c.m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED && c.userAnnotation)
+    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    if (c && c->m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
     {
-        c.userAnnotation->EndEvent();
-        --c.annotateDepth;
-        assert(c.annotateDepth >= 0);
+        c->userAnnotation->EndEvent();
+        if (--c->annotateDepth < 0)
+            c->annotateDepth = 0;
     }
 }
+
 
 void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
 {
@@ -401,82 +674,58 @@ void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
     m_commandBuffers = new CommandBuffer *[MAX_COMMAND_BUFFERS];
     m_commandMatrices = new DirectX::XMMATRIX[MAX_COMMAND_BUFFERS];
     m_commandIndexToHandle = new int[MAX_COMMAND_BUFFERS];
-    m_commandVertexTypes = new uint8_t[MAX_COMMAND_BUFFERS];
     m_commandPrimitiveTypes = new uint8_t[MAX_COMMAND_BUFFERS];
+    m_commandVertexTypes = new uint8_t[MAX_COMMAND_BUFFERS];
 
-    memset(m_commandHandleToIndex, 0xFF, NUM_COMMAND_HANDLES * sizeof(int16_t));
-    memset(m_commandBuffers, 0, MAX_COMMAND_BUFFERS * sizeof(CommandBuffer*));
-    memset(m_commandIndexToHandle, 0, MAX_COMMAND_BUFFERS * sizeof(int));
-    memset(m_commandVertexTypes, 0, MAX_COMMAND_BUFFERS * sizeof(uint8_t));
-    memset(m_commandPrimitiveTypes, 0, MAX_COMMAND_BUFFERS * sizeof(uint8_t));
+    memset(m_commandHandleToIndex, 0xFF, 0x1000000u);
+    memset(m_commandBuffers, 0, 0xFA00u);
+    memset(m_commandIndexToHandle, 0, 0xFA00u);
+    memset(m_commandPrimitiveTypes, 0, 0x3E80u);
+    memset(m_commandVertexTypes, 0, 0x3E80u);
 
     reservedRendererDword3 = 0;
     m_bShouldScreenGrabNextFrame = false;
-    m_bSuspended = false;
 
     SetupShaders();
     const float clearColour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     SetClearColour(clearColour);
 
-    UINT backBufferSampleCount = 1;
-    UINT backBufferSampleQuality = 0;
+    m_pDeviceContext->OMGetRenderTargets(1, &renderTargetView, &depthStencilView);
 
-    ID3D11Texture2D *backBuffer = NULL;
-    pSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
-    if (backBuffer)
-    {
-        D3D11_TEXTURE2D_DESC backDesc = {};
-        backBuffer->GetDesc(&backDesc);
-        backBufferWidth = backDesc.Width;
-        backBufferHeight = backDesc.Height;
-        backBufferSampleCount = backDesc.SampleDesc.Count;
-        backBufferSampleQuality = backDesc.SampleDesc.Quality;
+    D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    rtvDesc.Texture2D.MipSlice = 0;
 
-        m_pDevice->CreateRenderTargetView(backBuffer, NULL, &renderTargetView);
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = 1;
 
-        D3D11_TEXTURE2D_DESC srvDesc = backDesc;
-        srvDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        srvDesc.MiscFlags = 0;
+    ID3D11Resource *backBufferResource = NULL;
+    ID3D11Texture2D *backBufferTexture = NULL;
+    renderTargetView->GetResource(&backBufferResource);
+    backBufferResource->QueryInterface(IID_PPV_ARGS(&backBufferTexture));
 
-        ID3D11Texture2D *srvTexture = NULL;
-        m_pDevice->CreateTexture2D(&srvDesc, NULL, &srvTexture);
-        m_pDevice->CreateShaderResourceView(srvTexture, NULL, &renderTargetShaderResourceView);
+    D3D11_TEXTURE2D_DESC backDesc = {};
+    backBufferTexture->GetDesc(&backDesc);
+    backBufferWidth = backDesc.Width;
+    backBufferHeight = backDesc.Height;
+    renderTargetTextures[0] = backBufferTexture;
 
-        srvTexture->Release();
-        backBuffer->Release();
-    }
-
-    ID3D11RenderTargetView *boundRTV = NULL;
-    m_pDeviceContext->OMGetRenderTargets(1, &boundRTV, &depthStencilView);
-    if (boundRTV)
-        boundRTV->Release();
-
-    if (!depthStencilView && backBufferWidth != 0 && backBufferHeight != 0)
-    {
-        D3D11_TEXTURE2D_DESC depthDesc = {};
-        depthDesc.Width = backBufferWidth;
-        depthDesc.Height = backBufferHeight;
-        depthDesc.MipLevels = 1;
-        depthDesc.ArraySize = 1;
-        depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        depthDesc.SampleDesc.Count = backBufferSampleCount;
-        depthDesc.SampleDesc.Quality = backBufferSampleQuality;
-        depthDesc.Usage = D3D11_USAGE_DEFAULT;
-        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-
-        ID3D11Texture2D *depthTexture = NULL;
-        if (SUCCEEDED(m_pDevice->CreateTexture2D(&depthDesc, NULL, &depthTexture)))
-        {
-            m_pDevice->CreateDepthStencilView(depthTexture, NULL, &depthStencilView);
-            depthTexture->Release();
-        }
-    }
+    m_pDevice->CreateRenderTargetView(backBufferTexture, &rtvDesc, &renderTargetView);
+    m_pDevice->CreateShaderResourceView(backBufferTexture, &srvDesc, &renderTargetShaderResourceView);
+    backBufferResource->Release();
 
     D3D11_TEXTURE2D_DESC desc = {};
-    desc.MipLevels = 1;
+    desc.Width = 0;
+    desc.Height = 0;
     desc.ArraySize = 1;
+    desc.MipLevels = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     desc.CPUAccessFlags = 0;
@@ -486,14 +735,9 @@ void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
         desc.Width = s_auiWidths[i + 1];
         desc.Height = s_auiHeights[i + 1];
 
-        HRESULT hr = m_pDevice->CreateTexture2D(&desc, NULL, &renderTargetTextures[i]);
-        assert(hr == S_OK);
-
-        hr = m_pDevice->CreateRenderTargetView(renderTargetTextures[i], NULL, &renderTargetViews[i]);
-        assert(hr == S_OK);
-
-        hr = m_pDevice->CreateShaderResourceView(renderTargetTextures[i], NULL, &renderTargetShaderResourceViews[i]);
-        assert(hr == S_OK);
+        m_pDevice->CreateTexture2D(&desc, NULL, &renderTargetTextures[i]);
+        m_pDevice->CreateRenderTargetView(renderTargetTextures[i], &rtvDesc, &renderTargetViews[i]);
+        m_pDevice->CreateShaderResourceView(renderTargetTextures[i], &srvDesc, &renderTargetShaderResourceViews[i]);
     }
 
     memset(m_textures, 0, sizeof(m_textures));
@@ -516,8 +760,8 @@ void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
 
     reservedRendererDword1 = 0;
     activeVertexType = -1;
-    activePixelType = -1;
     reservedRendererByte1 = 1;
+    activePixelType = -1;
     reservedRendererByte0 = 0;
 
     unsigned short *quadIndices = new unsigned short[0x18000];
@@ -577,7 +821,7 @@ ID3D11DeviceContext *Renderer::InitialiseContext(bool fromPresent)
     else
         m_pDevice->CreateDeferredContext(0, &deviceContext);
 
-    Renderer::Context *c = new (std::nothrow) Renderer::Context(m_pDevice, deviceContext);
+    Renderer::Context *c = new Renderer::Context(m_pDevice, deviceContext);
     TlsSetValue(Renderer::tlsIdx, c);
 
     return deviceContext;
@@ -602,49 +846,47 @@ void Renderer::Present()
         PROFILER_SCOPE("Renderer::Present", "ScreenGrab", MP_MAGENTA)
 
         unsigned char *linearData = new unsigned char[kScreenGrabWidth * kScreenGrabHeight * 4];
-        
+
+        ID3D11Resource *backBufferResource = NULL;
         ID3D11Texture2D *backBuffer = NULL;
         ID3D11Texture2D *stagingTexture = NULL;
 
-        m_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
-        if (backBuffer)
-        {
-            D3D11_TEXTURE2D_DESC desc = {};
-            backBuffer->GetDesc(&desc);
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = 0;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            desc.MiscFlags = 0;
-            m_pDevice->CreateTexture2D(&desc, NULL, &stagingTexture);
-        }
+        renderTargetView->GetResource(&backBufferResource);
+        backBufferResource->QueryInterface(IID_PPV_ARGS(&backBuffer));
+        D3D11_TEXTURE2D_DESC desc = {};
+        backBuffer->GetDesc(&desc);
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+        desc.MiscFlags = 0;
+        m_pDevice->CreateTexture2D(&desc, NULL, &stagingTexture);
+        backBufferResource->Release();
 
-        if (stagingTexture && backBuffer)
+        if (stagingTexture)
         {
             PROFILER_SCOPE("Renderer::Present", "CopyResource", MP_MAGENTA)
             m_pDeviceContext->CopyResource(stagingTexture, backBuffer);
 
             D3D11_MAPPED_SUBRESOURCE mapped = {};
-            if (SUCCEEDED(m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped)))
+            m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ_WRITE, 0, &mapped);
+            const unsigned char *src = reinterpret_cast<const unsigned char *>(mapped.pData);
+
+            for (UINT y = 0; y < kScreenGrabHeight; ++y)
             {
-                const unsigned char *src = reinterpret_cast<const unsigned char *>(mapped.pData);
+                unsigned char *dstRow = linearData + y * kScreenGrabWidth * 4;
+                const unsigned char *srcRow = src + y * mapped.RowPitch;
+                memcpy(dstRow, srcRow, kScreenGrabWidth * 4);
 
-                for (UINT y = 0; y < kScreenGrabHeight; ++y)
-                {
-                    unsigned char *dstRow = linearData + y * kScreenGrabWidth * 4;
-                    const unsigned char *srcRow = src + y * mapped.RowPitch;
-                    memcpy(dstRow, srcRow, kScreenGrabWidth * 4);
-
-                    for (UINT x = 0; x < kScreenGrabWidth; ++x)
-                        dstRow[x * 4 + 3] = 0xFF;
-                }
-
-                m_pDeviceContext->Unmap(stagingTexture, 0);
+                for (UINT x = 0; x < kScreenGrabWidth; ++x)
+                    dstRow[x * 4 + 3] = 0xFF;
             }
+
+            m_pDeviceContext->Unmap(stagingTexture, 0);
         }
 
         static int count = 0;
         char fileName[304];
-        sprintf_s(fileName, "d:\\screen%d.png", count++);
+        sprintf(fileName, "d:\\screen%d.png", count++);
 
         D3DXIMAGE_INFO info;
         info.Width = kScreenGrabWidth;
@@ -652,17 +894,6 @@ void Renderer::Present()
         SaveTextureData(fileName, &info, reinterpret_cast<int *>(linearData));
 
         delete[] linearData;
-
-        if (stagingTexture)
-        {
-            stagingTexture->Release();
-            stagingTexture = NULL;
-        }
-        if (backBuffer)
-        {
-            backBuffer->Release();
-            backBuffer = NULL;
-        }
 
         m_bShouldScreenGrabNextFrame = false;
     }
@@ -681,41 +912,24 @@ void Renderer::SetClearColour(const float colourRGBA[4])
     for (int i = 0; i < 4; ++i)
         m_fClearColor[i] = colourRGBA[i];
 
-    Renderer::Context &c = getContext();
-    if (&c)
+    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    if (c)
     {
         D3D11_MAPPED_SUBRESOURCE mapped = {};
-        if (SUCCEEDED(c.m_pDeviceContext->Map(c.m_clearColorBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-        {
-            *(DirectX::XMVECTOR*)mapped.pData = DirectX::XMVectorSet(colourRGBA[0], colourRGBA[1], colourRGBA[2], colourRGBA[3]);
-            c.m_pDeviceContext->Unmap(c.m_clearColorBuffer, 0);
-        }
+        c->m_pDeviceContext->Map(c->m_clearColorBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        *(DirectX::XMVECTOR *)mapped.pData = DirectX::XMVectorSet(colourRGBA[0], colourRGBA[1], colourRGBA[2], colourRGBA[3]);
+        c->m_pDeviceContext->Unmap(c->m_clearColorBuffer, 0);
     }
 }
 
 void Renderer::SetupShaders()
 {
     vertexShaderTable = new ID3D11VertexShader *[C4JRender::VERTEX_TYPE_COUNT];
-    pixelShaderTable = new ID3D11PixelShader *[C4JRender::PIXEL_SHADER_COUNT];
     vertexStrideTable = new unsigned int[C4JRender::VERTEX_TYPE_COUNT];
-    inputLayoutTable = new ID3D11InputLayout *[C4JRender::VERTEX_TYPE_COUNT];
-
     for (UINT i = 0; i < C4JRender::VERTEX_TYPE_COUNT; ++i)
-    {
-        vertexShaderTable[i] = NULL;
-        inputLayoutTable[i] = NULL;
         vertexStrideTable[i] = g_vertexStrides[i];
-    }
-
-    for (UINT i = 0; i < C4JRender::PIXEL_SHADER_COUNT; ++i)
-    {
-        pixelShaderTable[i] = NULL;
-    }
-
-    screenSpaceVertexShader = NULL;
-    screenClearVertexShader = NULL;
-    screenSpacePixelShader = NULL;
-    screenClearPixelShader = NULL;
+    inputLayoutTable = new ID3D11InputLayout *[C4JRender::VERTEX_TYPE_COUNT];
+    pixelShaderTable = new ID3D11PixelShader *[C4JRender::PIXEL_SHADER_COUNT];
 
     m_pDevice->CreateVertexShader(g_main_VS_PF3_TF2_CB4_NB4_XW1, sizeof(g_main_VS_PF3_TF2_CB4_NB4_XW1), NULL, &vertexShaderTable[C4JRender::VERTEX_TYPE_PF3_TF2_CB4_NB4_XW1]);
     m_pDevice->CreateVertexShader(g_main_VS_Compressed, sizeof(g_main_VS_Compressed), NULL, &vertexShaderTable[C4JRender::VERTEX_TYPE_COMPRESSED]);
@@ -798,254 +1012,3 @@ Renderer::Context &Renderer::getContext()
     return *reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
 }
 
-void Renderer::CaptureThumbnail(ImageFileBuffer *pngOut)
-{
-    Renderer::Context &c = getContext();
-
-    float left = 0.0f;
-    float bottom = 0.0f;
-    float right = 1.0f;
-    float top = 1.0f;
-    
-    switch (m_ViewportType)
-    {
-    case C4JRender::VIEWPORT_TYPE_SPLIT_TOP:
-        bottom = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_SPLIT_BOTTOM:
-        top = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_SPLIT_LEFT:
-        right = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_SPLIT_RIGHT:
-        left = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_QUADRANT_TOP_LEFT:
-        right = 0.5f;
-        bottom = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_QUADRANT_TOP_RIGHT:
-        left = 0.5f;
-        bottom = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_QUADRANT_BOTTOM_LEFT:
-        right = 0.5f;
-        top = 0.5f;
-        break;
-    case C4JRender::VIEWPORT_TYPE_QUADRANT_BOTTOM_RIGHT:
-        left = 0.5f;
-        top = 0.5f;
-        break;
-    default:
-        break;
-    }
-
-    float aspectRatio = IsWidescreen() ? (16.0f / 9.0f) : (4.0f / 3.0f);
-
-    right *= aspectRatio;
-    left  *= aspectRatio;
-
-    float width  = right - left;
-    float height = top - bottom;
-
-    if (height > width)
-    {
-        float diff = (height - width) * 0.5f;
-        bottom += diff;
-        top    -= diff;
-    }
-    else
-    {
-        float diff = (width - height) * 0.5f;
-        left  += diff;
-        right -= diff;
-    }
-
-    left  /= aspectRatio;
-    right /= aspectRatio;
-
-    ID3D11BlendState *blendState = NULL;
-    ID3D11DepthStencilState *depthState = NULL;
-    ID3D11RasterizerState *rasterizerState = NULL;
-    ID3D11SamplerState *samplerState = NULL;
-    ID3D11Texture2D *stagingTexture = NULL;
-
-    D3D11_BLEND_DESC blendDesc = {};
-    blendDesc.RenderTarget[0].BlendEnable = false;
-    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
-    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
-    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    m_pDevice->CreateBlendState(&blendDesc, &blendState);
-
-    D3D11_DEPTH_STENCIL_DESC depthDesc = {};
-    depthDesc.DepthEnable = false;
-    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    depthDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
-    depthDesc.StencilEnable = false;
-    depthDesc.StencilReadMask = 0xFF;
-    depthDesc.StencilWriteMask = 0xFF;
-    depthDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
-    depthDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
-    depthDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
-    depthDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
-    depthDesc.BackFace = depthDesc.FrontFace;
-    m_pDevice->CreateDepthStencilState(&depthDesc, &depthState);
-
-    D3D11_RASTERIZER_DESC rasterDesc = {};
-    rasterDesc.FillMode = D3D11_FILL_SOLID;
-    rasterDesc.CullMode = D3D11_CULL_NONE;
-    rasterDesc.DepthClipEnable = true;
-    rasterDesc.MultisampleEnable = true;
-    m_pDevice->CreateRasterizerState(&rasterDesc, &rasterizerState);
-
-    D3D11_SAMPLER_DESC samplerDesc = {};
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.MaxAnisotropy = 1;
-    samplerDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-    samplerDesc.MinLOD = 0.0f;
-    samplerDesc.MaxLOD = (std::numeric_limits<float>::max)();
-    m_pDevice->CreateSamplerState(&samplerDesc, &samplerState);
-
-    c.m_pDeviceContext->VSSetShader(screenSpaceVertexShader, NULL, 0);
-    c.m_pDeviceContext->IASetInputLayout(NULL);
-    c.m_pDeviceContext->PSSetShader(screenSpacePixelShader, NULL, 0);
-    c.m_pDeviceContext->OMSetBlendState(blendState, NULL, -1);
-    c.m_pDeviceContext->OMSetDepthStencilState(depthState, 0);
-    c.m_pDeviceContext->RSSetState(rasterizerState);
-
-    for (UINT i = 0; i < MAX_MIP_LEVELS - 1; ++i)
-    {
-        D3D11_VIEWPORT viewport = {};
-        viewport.TopLeftX = 0.0f;
-        viewport.TopLeftY = 0.0f;
-        viewport.Width = (float)s_auiWidths[i + 1];
-        viewport.Height = (float)s_auiHeights[i + 1];
-        viewport.MinDepth = 0.0f;
-        viewport.MaxDepth = 1.0f;
-
-        c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetViews[i], NULL);
-        c.m_pDeviceContext->RSSetViewports(1, &viewport);
-
-        ID3D11ShaderResourceView *inputTexture = (i == 0) ? renderTargetShaderResourceView : renderTargetShaderResourceViews[i - 1];
-        c.m_pDeviceContext->PSSetShaderResources(0, 1, &inputTexture);
-        c.m_pDeviceContext->PSSetSamplers(0, 1, &samplerState);
-        c.m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-        D3D11_MAPPED_SUBRESOURCE mapped = {};
-        c.m_pDeviceContext->Map(c.m_thumbnailBoundsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-
-        float *constants = (float *)mapped.pData;
-        if (i == 0)
-        {
-            constants[0] = left;
-            constants[1] = bottom;
-            constants[2] = right - left;
-            constants[3] = top - bottom;
-        }
-        else
-        {
-            constants[0] = 0.0f;
-            constants[1] = 0.0f;
-            constants[2] = 1.0f;
-            constants[3] = 1.0f;
-        }
-
-        c.m_pDeviceContext->Unmap(c.m_thumbnailBoundsBuffer, 0);
-        c.m_pDeviceContext->Draw(4, 0);
-    }
-
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    renderTargetTextures[MAX_MIP_LEVELS - 2]->GetDesc(&texDesc);
-    texDesc.Usage = D3D11_USAGE_STAGING;
-    texDesc.BindFlags = 0;
-    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    texDesc.MiscFlags = 0;
-    m_pDevice->CreateTexture2D(&texDesc, NULL, &stagingTexture);
-
-    const unsigned int stride = kThumbnailSize * 4;
-    unsigned char *linearData = new unsigned char[kThumbnailSize * stride];
-
-    if (stagingTexture)
-    {
-        c.m_pDeviceContext->CopyResource(stagingTexture, renderTargetTextures[MAX_MIP_LEVELS - 2]);
-
-        D3D11_MAPPED_SUBRESOURCE mapped = {};
-        if (SUCCEEDED(c.m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped)))
-        {
-            const unsigned char *src = static_cast<const unsigned char *>(mapped.pData);
-            unsigned char *dst = linearData;
-
-            for (UINT y = 0; y < kThumbnailSize; ++y)
-            {
-                memcpy(dst, src, stride);
-
-                unsigned char *alpha = dst + 3;
-                for (UINT x = 0; x < kThumbnailSize; ++x)
-                {
-                    *alpha = 0xFF;
-                    alpha += 4;
-                }
-
-                src += mapped.RowPitch;
-                dst += stride;
-            }
-
-            c.m_pDeviceContext->Unmap(stagingTexture, 0);
-        }
-    }
-
-    ConvertLinearToPng(pngOut, linearData, kThumbnailSize, kThumbnailSize);
-    delete[] linearData;
-
-    if (stagingTexture)
-    {
-        stagingTexture->Release();
-        stagingTexture = NULL;
-    }
-    if (samplerState)
-    {
-        samplerState->Release();
-        samplerState = NULL;
-    }
-    if (rasterizerState)
-    {
-        rasterizerState->Release();
-        rasterizerState = NULL;
-    }
-    if (depthState)
-    {
-        depthState->Release();
-        depthState = NULL;
-    }
-    if (blendState)
-    {
-        blendState->Release();
-        blendState = NULL;
-    }
-
-    c.m_pDeviceContext->OMSetBlendState(GetManagedBlendState(), c.blendFactor, -1);
-    c.m_pDeviceContext->OMSetDepthStencilState(GetManagedDepthStencilState(), 0);
-    c.m_pDeviceContext->RSSetState(GetManagedRasterizerState());
-
-    D3D11_VIEWPORT viewport = {};
-    viewport.TopLeftX = 0.0f;
-    viewport.TopLeftY = 0.0f;
-    viewport.Width = (float)backBufferWidth;
-    viewport.Height = (float)backBufferHeight;
-    viewport.MinDepth = 0.0f;
-    viewport.MaxDepth = 1.0f;
-
-    c.m_pDeviceContext->RSSetViewports(1, &viewport);
-    c.m_pDeviceContext->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
-
-    activeVertexType = -1;
-    activePixelType = -1;
-}
