@@ -41,14 +41,14 @@ void user_write_data_init(unsigned char* pBuffer, int size)
 
 int user_write_data_bytes_written()
 {
-    return static_cast<int>(dataCurr - dataStart);
+    return (int)(dataCurr - dataStart);
 }
 
 void user_write_data(png_struct_def* png_ptr, unsigned char* src, size_t length)
 {
-    int bytesToWrite = static_cast<int>(dataEnd - dataCurr);
-    if (static_cast<int>(length) < bytesToWrite)
-        bytesToWrite = static_cast<int>(length);
+    int bytesToWrite = (int)(dataEnd - dataCurr);
+    if ((int)length < bytesToWrite)
+        bytesToWrite = (int)length;
 
     memcpy(dataCurr, src, bytesToWrite);
     dataCurr += bytesToWrite;
@@ -167,8 +167,8 @@ void Renderer::TextureData(int width, int height, void* data, int level, C4JRend
         level, 
         NULL, 
         data, 
-        static_cast<UINT>(width * 4),
-        static_cast<UINT>(width * height * 4)
+        (UINT)(width * 4),
+        (UINT)(width * height * 4)
     );
 }
 
@@ -194,8 +194,8 @@ void Renderer::TextureDataUpdate(int xoffset, int yoffset, int width, int height
         level,
         &box,
         data,
-        static_cast<UINT>(width * 4),
-        static_cast<UINT>(width * height * 4)
+        (UINT)(width * 4),
+        (UINT)(width * height * 4)
     );
 }
 
@@ -330,7 +330,7 @@ HRESULT Renderer::SaveTextureDataToMemory(void* pOutput, int outputCapacity, int
 
     png_image_write_to_stdio(&image, NULL, 0, ppDataIn, 0, NULL, user_write_data, user_flush_data);
 
-    *outputLength = static_cast<int>(dataCurr - dataStart);
+    *outputLength = (int)(dataCurr - dataStart);
     return S_OK;
 }
 

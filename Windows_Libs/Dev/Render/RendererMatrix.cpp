@@ -29,13 +29,16 @@ SOFTWARE.
 
 const float *Renderer::MatrixGet(int type)
 {
+    PROFILER_SCOPE("Renderer::MatrixGet", "MatrixGet", MP_ORCHID1)
     Context &c = getContext();
     const int depth = c.stackPos[type];
-    return reinterpret_cast<const float *>(&c.matrixStacks[type][depth]);
+    const DirectX::XMMATRIX &matrix = c.matrixStacks[type][depth];
+    return &matrix.r[0].m128_f32[0];
 }
 
 void Renderer::MatrixMode(int type)
 {
+    PROFILER_SCOPE("Renderer::MatrixMode", "MatrixMode", MP_ORCHID1)
     Context &c = getContext();
     assert(type >= 0);
     assert(type < STACK_TYPES);
@@ -44,6 +47,7 @@ void Renderer::MatrixMode(int type)
 
 void Renderer::MatrixMult(float *mat)
 {
+    PROFILER_SCOPE("Renderer::MatrixMult", "MatrixMult", MP_ORCHID1)
     DirectX::XMMATRIX matrix;
     std::memcpy(&matrix, mat, sizeof(matrix));
     MultWithStack(matrix);
@@ -51,19 +55,22 @@ void Renderer::MatrixMult(float *mat)
 
 void Renderer::MatrixOrthogonal(float left, float right, float bottom, float top, float zNear, float zFar)
 {
+    PROFILER_SCOPE("Renderer::MatrixOrthogonal", "MatrixOrthogonal", MP_ORCHID1)
     const DirectX::XMMATRIX matrix = DirectX::XMMatrixOrthographicOffCenterRH(left, right, bottom, top, zNear, zFar);
     MultWithStack(matrix);
 }
 
 void Renderer::MatrixPerspective(float fovy, float aspect, float zNear, float zFar)
 {
-    const float fovRadians = fovy * (3.14159274f / 180.0f);
+    PROFILER_SCOPE("Renderer::MatrixPerspective", "MatrixPerspective", MP_ORCHID1)
+    const float fovRadians = fovy * (PI / 180.0f);
     const DirectX::XMMATRIX matrix = DirectX::XMMatrixPerspectiveFovRH(fovRadians, aspect, zNear, zFar);
     MultWithStack(matrix);
 }
 
 void Renderer::MatrixPop()
 {
+    PROFILER_SCOPE("Renderer::MatrixPop", "MatrixPop", MP_ORCHID1)
     Context &c = getContext();
 
     assert(c.stackPos[c.stackType] > 0);
@@ -75,6 +82,7 @@ void Renderer::MatrixPop()
 
 void Renderer::MatrixPush()
 {
+    PROFILER_SCOPE("Renderer::MatrixPush", "MatrixPush", MP_ORCHID1)
     Context &c = getContext();
     
     assert(c.stackPos[c.stackType] < (STACK_SIZE - 1));
@@ -87,6 +95,7 @@ void Renderer::MatrixPush()
 
 void Renderer::MatrixRotate(float angle, float x, float y, float z)
 {
+    PROFILER_SCOPE("Renderer::MatrixRotate", "MatrixRotate", MP_ORCHID1)
     const DirectX::XMVECTOR axis = DirectX::XMVectorSet(x, y, z, 0.0f);
     const DirectX::XMMATRIX matrix = DirectX::XMMatrixRotationAxis(axis, angle);
     MultWithStack(matrix);
@@ -94,12 +103,14 @@ void Renderer::MatrixRotate(float angle, float x, float y, float z)
 
 void Renderer::MatrixScale(float x, float y, float z)
 {
+    PROFILER_SCOPE("Renderer::MatrixScale", "MatrixScale", MP_ORCHID1)
     const DirectX::XMMATRIX matrix = DirectX::XMMatrixScaling(x, y, z);
     MultWithStack(matrix);
 }
 
 void Renderer::MatrixSetIdentity()
 {
+    PROFILER_SCOPE("Renderer::MatrixSetIdentity", "MatrixSetIdentity", MP_ORCHID1)
     Context &c = getContext();
     const int mode = c.stackType;
     const int depth = c.stackPos[mode];
@@ -109,12 +120,14 @@ void Renderer::MatrixSetIdentity()
 
 void Renderer::MatrixTranslate(float x, float y, float z)
 {
+    PROFILER_SCOPE("Renderer::MatrixTranslate", "MatrixTranslate", MP_ORCHID1)
     const DirectX::XMMATRIX matrix = DirectX::XMMatrixTranslation(x, y, z);
     MultWithStack(matrix);
 }
 
 void Renderer::MultWithStack(DirectX::XMMATRIX matrix)
 {
+    PROFILER_SCOPE("Renderer::MultWithStack", "MultWithStack", MP_ORCHID1)
     Context &c = getContext();
     const int mode = c.stackType;
     const int depth = c.stackPos[mode];
@@ -125,6 +138,7 @@ void Renderer::MultWithStack(DirectX::XMMATRIX matrix)
 
 void Renderer::Set_matrixDirty()
 {
+    PROFILER_SCOPE("Renderer::Set_matrixDirty", "Set_matrixDirty", MP_ORCHID1)
     Context &c = getContext();
     const DirectX::XMMATRIX identity = DirectX::XMMatrixIdentity();
 

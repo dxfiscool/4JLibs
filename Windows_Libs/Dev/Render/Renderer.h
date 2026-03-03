@@ -416,6 +416,7 @@ public:
     static DXGI_FORMAT textureFormats[];
     static D3D_PRIMITIVE_TOPOLOGY g_topologies[];
     static int totalAlloc;
+    static const float PI;
 
     float m_fClearColor[4];
     ID3D11Device *m_pDevice;

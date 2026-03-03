@@ -34,6 +34,7 @@ _RTL_CRITICAL_SECTION Renderer::totalAllocCS = {};
 DWORD Renderer::s_auiWidths[]  = { 1920, 512, 256, 128, 64, 0 };
 DWORD Renderer::s_auiHeights[] = { 1080, 512, 256, 128, 64 };
 int Renderer::totalAlloc = 0;
+const float Renderer::PI = 3.14159274f;
 
 D3D11_INPUT_ELEMENT_DESC g_vertex_PTN_Elements_PF3_TF2_CB4_NB4_XW1[] = {
     {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -230,7 +231,7 @@ Renderer::Context::Context(ID3D11Device* device, ID3D11DeviceContext* deviceCont
 
     {
         void *dynamicVertexPtr = operator new[](kVertexBufferSize);
-        dynamicVertexBase = reinterpret_cast<std::uint64_t>(dynamicVertexPtr);
+        dynamicVertexBase = (std::uint64_t)dynamicVertexPtr;
     }
     dynamicVertexOffset = 0;
 
@@ -248,7 +249,7 @@ void Renderer::BeginConditionalSurvey(int) {}
 
 void Renderer::BeginEvent(LPCWSTR eventName)
 {
-    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    Renderer::Context *c = (Renderer::Context *)TlsGetValue(Renderer::tlsIdx);
     if (c && c->m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
     {
         c->userAnnotation->BeginEvent(eventName);
@@ -471,7 +472,7 @@ void Renderer::CaptureThumbnail(ImageFileBuffer *pngOut)
 
         D3D11_MAPPED_SUBRESOURCE mapped = {};
         c.m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ_WRITE, 0, &mapped);
-        const unsigned char *src = static_cast<const unsigned char *>(mapped.pData);
+        const unsigned char *src = (const unsigned char *)mapped.pData;
         unsigned char *dst = linearData;
 
         for (UINT y = 0; y < kThumbnailSize; ++y)
@@ -533,8 +534,8 @@ void Renderer::Clear(int flags, D3D11_RECT *)
 {
     PROFILER_SCOPE("Renderer::Clear", "Clear", MP_MAGENTA)
 
-    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
-    unsigned char clearFlags = static_cast<unsigned char>(flags);
+    Renderer::Context *c = (Renderer::Context *)TlsGetValue(Renderer::tlsIdx);
+    unsigned char clearFlags = (unsigned char)flags;
 
     ID3D11BlendState *blendState = NULL;
     ID3D11DepthStencilState *depthState = NULL;
@@ -618,7 +619,7 @@ void Renderer::Clear(int flags, D3D11_RECT *)
 
 void Renderer::ConvertLinearToPng(ImageFileBuffer *pngOut, unsigned char *linearData, unsigned int width, unsigned int height)
 {
-    const size_t dataSize = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    const size_t dataSize = (size_t)width * (size_t)height * 4;
     const size_t outputCapacity = (dataSize * 24) / 20 + 256;
 
     void *outputBuffer = malloc(outputCapacity);
@@ -626,11 +627,11 @@ void Renderer::ConvertLinearToPng(ImageFileBuffer *pngOut, unsigned char *linear
 
     SaveTextureDataToMemory(
         outputBuffer, 
-        static_cast<int>(outputCapacity), 
+        (int)outputCapacity, 
         &outputLength, 
-        static_cast<int>(width), 
-        static_cast<int>(height),
-        reinterpret_cast<int *>(linearData)
+        (int)width, 
+        (int)height,
+        (int *)linearData
     );
    
     pngOut->m_type = ImageFileBuffer::e_typePNG;
@@ -649,7 +650,7 @@ void Renderer::EndConditionalSurvey() {}
 
 void Renderer::EndEvent()
 {
-    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    Renderer::Context *c = (Renderer::Context *)TlsGetValue(Renderer::tlsIdx);
     if (c && c->m_pDeviceContext->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
     {
         c->userAnnotation->EndEvent();
@@ -767,7 +768,7 @@ void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
     unsigned short *quadIndices = new unsigned short[0x18000];
     for (UINT i = 0; i < 0x4000; ++i)
     {
-        unsigned short base = static_cast<unsigned short>(i * 4);
+        unsigned short base = (unsigned short)(i * 4);
         unsigned int offset = i * 6;
         quadIndices[offset + 0] = base;
         quadIndices[offset + 1] = base + 1;
@@ -795,8 +796,8 @@ void Renderer::Initialise(ID3D11Device *pDevice, IDXGISwapChain *pSwapChain)
     {
         unsigned int offset = i * 3;
         fanIndices[offset + 0] = 0;
-        fanIndices[offset + 1] = static_cast<unsigned short>(i + 1);
-        fanIndices[offset + 2] = static_cast<unsigned short>(i + 2);
+        fanIndices[offset + 1] = (unsigned short)(i + 1);
+        fanIndices[offset + 2] = (unsigned short)(i + 2);
     }
 
     D3D11_BUFFER_DESC fanIndexDesc = {};
@@ -869,7 +870,7 @@ void Renderer::Present()
 
             D3D11_MAPPED_SUBRESOURCE mapped = {};
             m_pDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ_WRITE, 0, &mapped);
-            const unsigned char *src = reinterpret_cast<const unsigned char *>(mapped.pData);
+            const unsigned char *src = (const unsigned char *)mapped.pData;
 
             for (UINT y = 0; y < kScreenGrabHeight; ++y)
             {
@@ -891,7 +892,7 @@ void Renderer::Present()
         D3DXIMAGE_INFO info;
         info.Width = kScreenGrabWidth;
         info.Height = kScreenGrabHeight;
-        SaveTextureData(fileName, &info, reinterpret_cast<int *>(linearData));
+        SaveTextureData(fileName, &info, (int *)linearData);
 
         delete[] linearData;
 
@@ -912,7 +913,7 @@ void Renderer::SetClearColour(const float colourRGBA[4])
     for (int i = 0; i < 4; ++i)
         m_fClearColor[i] = colourRGBA[i];
 
-    Renderer::Context *c = reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    Renderer::Context *c = (Renderer::Context *)TlsGetValue(Renderer::tlsIdx);
     if (c)
     {
         D3D11_MAPPED_SUBRESOURCE mapped = {};
@@ -1009,6 +1010,5 @@ void Renderer::UpdateGamma(unsigned short) {}
 
 Renderer::Context &Renderer::getContext()
 {
-    return *reinterpret_cast<Renderer::Context *>(TlsGetValue(Renderer::tlsIdx));
+    return *(Renderer::Context *)TlsGetValue(Renderer::tlsIdx);
 }
-
